@@ -10,7 +10,7 @@ start_port = 34012
 port_range = 10
 
 global_buffer_size = fake_pty.BUFFER_SIZE
-larger_buffer_size = global_buffer_size * 4
+larger_buffer_size = global_buffer_size * 4 * 2
 
 verbose_logs = False
 
