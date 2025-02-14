@@ -143,41 +143,10 @@ class pilot_backend:
 
         self.jobs = jobs
 
-    def setup_interactive(self, pilot):
-        exitmsg = "\n\rUse pilot.quit() to quit or press again ^D quickly!\n\r"
-
-        # wait for first connection
-        while not pilot.connected:
-            cnt = int(time.time() * 10) % 4
-            print(" [{}] connecting...".format("|/—\\"[cnt]), end="\r")
-            time.sleep(0.1)
-        print("                   ", end="\r")
-
-        banner = "Connected!"
-        if pilot.handler.values.get("argv_cmd") is None:
-            time.sleep(0.5)
-
-        argv = pilot.handler.values.get("argv_cmd")
-        if argv is not None:
-            banner = f'Connected to "{" ".join(argv)}"'
-
-        last_exit = 0
-        while not pilot.finished:
-            try:
-                code.interact(banner=banner, exitmsg=exitmsg, local=dict(pilot=pilot))
-            except (KeyboardInterrupt, SystemExit):
-                pass
-
-            # if blocked, will exit at some point
-            if abs(last_exit - time.time()) < 2:
-                pilot.quit()
-
-            last_exit = time.time()
-
     def start(
         self,
         *,
-        callback=(lambda backend, frontend: backend.setup_interactive(frontend)),
+        callback=(lambda pilot: pilot.drop_shell()),
     ):
         pilot = pilot_frontend(backend=self, timeout=self.timeout)
 
@@ -185,7 +154,7 @@ class pilot_backend:
         for job in self.jobs:
             job.start()
 
-        return callback(self, pilot)
+        return callback(pilot)
 
     def quit(self, exit_func=lambda: os._exit(0)):
         self.finished = True
@@ -274,38 +243,94 @@ class pilot_frontend:
             return None
         return sz[0]
 
-    def intercept(self, callback=None, decode=False, verbose_hex=False):
-        original_method = self.handler.stdin
-        is_finished = False
+    def wait_for_driver(self, animated=True):
+        while not self.connected:
+            if animated:
+                cnt = int(time.time() * 10) % 4
+                print(" [{}] connecting...".format("|/—\\"[cnt]), end="\r", file=sys.stderr)
+            time.sleep(0.1)
 
-        try:
+        if animated:
+            print("                   ", end="\r", file=sys.stderr)
 
-            def stdin_interceptor(data):
-                nonlocal callback
-                nonlocal decode
-                nonlocal verbose_hex
-                nonlocal is_finished
+    def drop_shell(self, extra_locals=None, banner=None, exitmsg=None, confirm_exit=True):
+        if confirm_exit:
+            exitmsg = exitmsg or "\n\rUse pilot.quit() to quit or press again ^D quickly!\n\r"
 
-                if verbose_hex:
-                    print(dict(stdin=data.hex()), end="\n\r", file=sys.stderr)
-                if decode:
-                    data = data.decode()
-                elif callback is None and isinstance(data, bytes):
-                    data = data.__repr__()[2:-1]
+        if banner is None and self.handler.values.get("argv_cmd") is None:
+            time.sleep(0.5)
 
-                if callback is None and not verbose_hex:
-                    print(data, end="", flush=True)
-                    return
+        argv = self.handler.values.get("argv_cmd")
+        if banner is None and argv is not None:
+            banner = f'Connected to "{" ".join(argv)}"'
+        if banner is None:
+            banner = 'Connected!'
 
-                retval = callback(data)
-                if not retval:
-                    is_finished = True
+        last_exit = 0
+        while not self.finished:
+            try:
+                local = dict(pilot=self)
+                local.update(extra_locals or dict())
+                code.interact(banner=banner, exitmsg=exitmsg, local=local)
+            except (KeyboardInterrupt, SystemExit):
+                pass
 
-            self.handler.stdin = stdin_interceptor
-            while not is_finished:
-                time.sleep(0.1)
-        finally:
-            self.handler.stdin = original_method
+            # if blocked, will exit at some point
+            if abs(last_exit - time.time()) < 2 or not confirm_exit:
+                self.quit()
+
+            last_exit = time.time()
+
+    def drop_task(self, task, freq=1, try_restart=True, **task_kwargs):
+
+        def _pilot_task(self, task, freq, task_kwargs):
+            while not self.finished:
+                task(self, **task_kwargs)
+                time.sleep(1 / freq)
+
+        def _pilot_restart_task(self, task, freq, task_kwargs):
+            while not self.finished:
+                try:
+                    task(self, **task_kwargs)
+                except (TimeoutError, BrokenPipeError, ConnectionResetError):
+                    pass
+                time.sleep(1 / freq)
+
+        which_job = _pilot_restart_task if try_restart else _pilot_task
+        new_task = threading.Thread(target=which_job,
+                                    kwargs=dict(
+                                        self=self,
+                                        task=task,
+                                        freq=freq,
+                                        task_kwargs=task_kwargs),
+                                    daemon=True)
+
+        self.backend.jobs.append(new_task)
+        new_task.start()
+        return new_task
+
+    def quit(self, exit_func=lambda: os._exit(0)):
+        self.finished = True
+        if self.backend.active_handler is not None:
+            try:
+                self.backend.active_handler.close("closed by user")
+            except BrokenPipeError:
+                pass
+
+        self.backend.finished = True
+        self.backend.quit(exit_func=exit_func)
+
+    def text_at(self, row_number, rstrip=" ", first_row_is_one=True):
+        if first_row_is_one:
+            row_number -= 1
+
+        if row_number > len(self.handler.display):
+            return None
+
+        row = self.handler.display[row_number]
+        if rstrip:
+            row = row.rstrip(rstrip)
+        return row
 
     def show(self, *, colors=False, cursor=False, cropped=True, **kwargs):
         kwargs["display_only"] = kwargs.get("display_only", True)
@@ -478,6 +503,39 @@ class pilot_frontend:
             if stdin_mode is not None:
                 tty.tcsetattr(pty.STDIN_FILENO, tty.TCSAFLUSH, stdin_mode)
 
+    def intercept(self, callback=None, decode=False, verbose_hex=False):
+        original_method = self.handler.stdin
+        is_finished = False
+
+        try:
+
+            def stdin_interceptor(data):
+                nonlocal callback
+                nonlocal decode
+                nonlocal verbose_hex
+                nonlocal is_finished
+
+                if verbose_hex:
+                    print(dict(stdin=data.hex()), end="\n\r", file=sys.stderr)
+                if decode:
+                    data = data.decode()
+                elif callback is None and isinstance(data, bytes):
+                    data = data.__repr__()[2:-1]
+
+                if callback is None and not verbose_hex:
+                    print(data, end="", flush=True)
+                    return
+
+                retval = callback(data)
+                if not retval:
+                    is_finished = True
+
+            self.handler.stdin = stdin_interceptor
+            while not is_finished:
+                time.sleep(0.1)
+        finally:
+            self.handler.stdin = original_method
+
     def input(self, interactive=True, *, data=None, raw=False):
         data = data or interactive
         if isinstance(data, bytes) and not raw:
@@ -495,30 +553,111 @@ class pilot_frontend:
 
         self.handler.send(what="write_to_tty", data=data)
 
-    def quit(self, exit_func=lambda: os._exit(0)):
-        self.finished = True
-        if self.backend.active_handler is not None:
-            try:
-                self.backend.active_handler.close("closed by user")
-            except BrokenPipeError:
-                pass
+    # TODO: overlay should be handled on driver side
+    def draw(self, y_rows, x_cols, char,
+             *,
+             overlay=True,
+             first_rowcol_is_one=True,
+             **charspec_attrs):
 
-        self.backend.finished = True
-        self.backend.quit(exit_func=exit_func)
+        if not first_rowcol_is_one:
+            x_cols += 1
+            y_rows += 1
 
-    def text_at(self, row_number, rstrip=" ", first_row_is_one=True):
-        if first_row_is_one:
-            row_number -= 1
+        assert isinstance(char, str)
+        assert len(char.encode()) <= charspec.datamaxsz # <= 8
 
-        if row_number > len(self.handler.display):
-            return None
+        if not overlay and y_rows >= 1 and x_cols >= 1:
+            newchar = ''
+            for xoffset, newc in enumerate(char):
+                if y_rows - 1 >= len(self.handler.display):
+                    break
 
-        row = self.handler.display[row_number]
-        if rstrip:
-            row = row.rstrip(rstrip)
-        return row
+                row = self.handler.display[y_rows - 1]
+                if x_cols - 1 + xoffset >= len(row):
+                    break
 
+                oldc = row[x_cols + xoffset - 1]
+                if oldc == ' ':
+                    newchar += newc
+                else:
+                    break
+            char = newchar
+
+        req = dict(where=[y_rows, x_cols],
+                   char=char,
+                   attrs=charspec_attrs if charspec_attrs else None)
+
+        self.handler.send(what='draw', data=req)
+
+    # TODO: overlay should be handled on driver side
+    def draw2d(self, y_rows, x_cols, char_matrix,
+               **draw_kwargs):
+
+        for yoffset, char in enumerate(char_matrix):
+            self.draw(y_rows + yoffset, x_cols, char=char, **draw_kwargs)
+
+    # TODO: animations should be handled on driver side
+    # TODO: cleanup should be handled on driver side
+    def draw_anim(self, y_rows, x_cols, char_sequence,
+                  *,
+                  stepsize=0.1,
+                  clear_after=True,
+                  **draw_kwargs):
+
+        maxsz = 0
+        for char in char_sequence:
+            maxsz = max(len(char), maxsz)
+            self.draw(y_rows, x_cols, char=char, **draw_kwargs)
+            time.sleep(stepsize)
+
+        if clear_after:
+            self.draw(y_rows, x_cols, char=' ' * maxsz, **draw_kwargs)
+
+    # TODO: animations should be handled on driver side
+    # TODO: cleanup should be handled on driver side
+    def draw2d_anim(self, y_rows, x_cols, matrix_sequence,
+                    *,
+                    stepsize=0.1,
+                    clear_after=True,
+                    **draw_kwargs):
+
+        y_maxsz = 0
+        x_maxsz = 0
+        for matrix in matrix_sequence:
+            y_maxsz = max(len(matrix), y_maxsz)
+            x_maxsz = max(max(len(c) for c in matrix), x_maxsz)
+
+            self.draw2d(y_rows, x_cols, char_matrix=matrix, **draw_kwargs)
+            time.sleep(stepsize)
+
+        if clear_after:
+            cleanup = [' ' * x_maxsz for _ in range(y_maxsz)]
+            self.draw2d(y_rows, x_cols, char_matrix=cleanup, **draw_kwargs)
 
 def main():
     backend = pilot_backend()
-    backend.start()
+
+    if len(sys.argv) < 2:
+        def interactive_shell(pilot):
+            pilot.wait_for_driver()
+            pilot.drop_shell()
+
+        backend.start(callback=interactive_shell)
+        sys.exit(0)
+
+    if len(sys.argv) == 2:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("userscript", sys.argv[1])
+
+        userscript = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = userscript
+        spec.loader.exec_module(userscript)
+
+        backend.start(callback=lambda pilot: userscript.main(pilot))
+        sys.exit(0)
+
+    if len(sys.argv) > 2:
+        print(f"Usage: {sys.argv[0]} [userscript.py]", file=sys.stderr)
+        sys.exit(1)

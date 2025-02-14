@@ -35,6 +35,9 @@ class client_handler(common.basic_handler):
         super().__init__(remote=remote, version=version)
         self.parent = parent
 
+    def kill(self, code):
+        os._exit(code)
+
     def get_value(self, value_name):
         if value_name in self.values_from_parent:
             value = getattr(self.parent, value_name)
@@ -133,9 +136,21 @@ class client_handler(common.basic_handler):
         if self.parent.child_fd is not None:
             os.write(self.parent.child_fd, input_bytes)
 
-    def kill(self, code):
-        os._exit(code)
+    def draw(self, where, char, attrs=None):
+        if not ansiseq.ready:
+            ansiseq.initialize()
 
+        seq = ansiseq.sc + ansiseq.cup(*where)
+        if attrs is None and isinstance(char, str):
+            seq += char.encode()
+        else:
+            char = charspec(data=char, **attrs)
+            seq += ansiseq.sgr0
+            seq += char.seq
+            seq += char.data
+        seq += ansiseq.rc
+
+        os.write(fake_pty.STDOUT_FILENO, seq)
 
 class pty_driver:
 
@@ -388,10 +403,15 @@ class pty_driver:
         if not self.has_smcup:
             self.has_smcup = True
             if ansiseq.smcup not in self.early_buffer:
-                atexit.register(print, ansiseq.rmcup.decode(), end="", flush=True)
-                print(ansiseq.smcup.decode(), end="")
-                print(ansiseq.clear.decode(), end="")
-                print(ansiseq.cup00.decode(), end="", flush=True)
+                def _rmcup_delayed():
+                    print(ansiseq.decoded.smcup)
+                    print(ansiseq.decoded.clear)
+                    print(flush=True)
+                    print(ansiseq.decoded.rmcup, end='', flush=True)
+                atexit.register(_rmcup_delayed)
+                print(ansiseq.decoded.smcup, end="")
+                print(ansiseq.decoded.clear, end="")
+                print(ansiseq.decoded.cup00, end="", flush=True)
 
         # if leftovers in early_buffer, prepend it to out
         if self.early_buffer:

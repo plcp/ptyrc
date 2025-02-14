@@ -100,15 +100,15 @@ class charspec:
 
     def __init__(
         self,
-        data: str,
-        fg: str,
-        bg: str,
-        bold: bool,
-        italics: bool,
-        underscore: bool,
-        strikethrough: bool,
-        reverse: bool,
-        blink: bool,
+        data = ' ',
+        fg = 'default',
+        bg = 'default',
+        bold = False,
+        italics = False,
+        underscore = False,
+        strikethrough = False,
+        reverse = False,
+        blink = False,
     ):
 
         if isinstance(data, str):
@@ -299,7 +299,7 @@ class charspec:
             asval += 1
         elif colorname.endswith("green"):
             asval += 2
-        elif colorname.endswith("brown"):
+        elif colorname.endswith("brown") or colorname.endswith("yellow"):
             asval += 3
         elif colorname.endswith("blue"):
             asval += 4
