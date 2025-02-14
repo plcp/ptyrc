@@ -1,0 +1,3 @@
+pyte @ git+https://github.com/plcp/ptyrc-pyte@master
+black
+isort
