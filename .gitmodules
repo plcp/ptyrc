@@ -1,0 +1,3 @@
+[submodule "ptyrc-pyte"]
+	path = ptyrc-pyte
+	url = https://github.com/plcp/ptyrc-pyte.git
