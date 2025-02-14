@@ -8,6 +8,8 @@ walked on its own.
 The initial goal was to wrap a CLI application like [`vim`](https://vim.org) to
 add confetti to its output.
 
+![confetti](doc/confetti.gif)
+
 # Quick setup
 
 This is not yet published on [PyPI](https://pypi.org):
