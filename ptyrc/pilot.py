@@ -203,6 +203,7 @@ class pilot_frontend:
         PAGE_DOWN = "\x1b[6~"
         BACKSPACE = "\x08"
         ENTER = "\r"
+        RETURN = "\r"
         CTRL_C = "\x03"
         CTRL_D = "\x03"
         CTRL_X = "\x18"
@@ -242,8 +243,36 @@ class pilot_frontend:
         return self.handler.values.get("cursor_position")
 
     @property
+    def cursor_row(self):
+        pos = self.handler.values.get("cursor_position")
+        if pos is None:
+            return None
+        return pos[1]
+
+    @property
+    def cursor_column(self):
+        pos = self.handler.values.get("cursor_position")
+        if pos is None:
+            return None
+        return pos[0]
+
+    @property
     def size(self):
         return self.handler.values.get("terminal_size")
+
+    @property
+    def size_rows_count(self):
+        sz = self.handler.values.get("terminal_size")
+        if sz is None:
+            return None
+        return sz[1]
+
+    @property
+    def size_columns_count(self):
+        sz = self.handler.values.get("terminal_size")
+        if sz is None:
+            return None
+        return sz[0]
 
     def intercept(self, callback=None, decode=False, verbose_hex=False):
         original_method = self.handler.stdin
@@ -476,6 +505,18 @@ class pilot_frontend:
 
         self.backend.finished = True
         self.backend.quit(exit_func=exit_func)
+
+    def text_at(self, row_number, rstrip=" ", first_row_is_one=True):
+        if first_row_is_one:
+            row_number -= 1
+
+        if row_number > len(self.handler.display):
+            return None
+
+        row = self.handler.display[row_number]
+        if rstrip:
+            row = row.rstrip(rstrip)
+        return row
 
 
 def main():

@@ -13,14 +13,12 @@ import threading
 import time
 import tty
 
+import pyte
+
 import ptyrc.common as common
 import ptyrc.fake_pty as fake_pty
 from ptyrc.common import verbose
 from ptyrc.termcap import ansiseq, charspec
-
-ansiseq.initialize()
-os.environ["TERM"] = "vt220"
-import pyte
 
 
 class client_handler(common.basic_handler):
