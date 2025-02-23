@@ -248,15 +248,23 @@ class pilot_frontend:
         while not self.connected:
             if animated:
                 cnt = int(time.time() * 10) % 4
-                print(" [{}] connecting...".format("|/—\\"[cnt]), end="\r", file=sys.stderr)
+                print(
+                    " [{}] connecting...".format("|/—\\"[cnt]),
+                    end="\r",
+                    file=sys.stderr,
+                )
             time.sleep(0.1)
 
         if animated:
             print("                   ", end="\r", file=sys.stderr)
 
-    def drop_shell(self, extra_locals=None, banner=None, exitmsg=None, confirm_exit=True):
+    def drop_shell(
+        self, extra_locals=None, banner=None, exitmsg=None, confirm_exit=True
+    ):
         if confirm_exit:
-            exitmsg = exitmsg or "\n\rUse pilot.quit() to quit or press again ^D quickly!\n\r"
+            exitmsg = (
+                exitmsg or "\n\rUse pilot.quit() to quit or press again ^D quickly!\n\r"
+            )
 
         if banner is None and self.handler.values.get("argv_cmd") is None:
             time.sleep(0.5)
@@ -265,7 +273,7 @@ class pilot_frontend:
         if banner is None and argv is not None:
             banner = f'Connected to "{" ".join(argv)}"'
         if banner is None:
-            banner = 'Connected!'
+            banner = "Connected!"
 
         last_exit = 0
         while not self.finished:
@@ -298,13 +306,11 @@ class pilot_frontend:
                 time.sleep(1 / freq)
 
         which_job = _pilot_restart_task if try_restart else _pilot_task
-        new_task = threading.Thread(target=which_job,
-                                    kwargs=dict(
-                                        self=self,
-                                        task=task,
-                                        freq=freq,
-                                        task_kwargs=task_kwargs),
-                                    daemon=True)
+        new_task = threading.Thread(
+            target=which_job,
+            kwargs=dict(self=self, task=task, freq=freq, task_kwargs=task_kwargs),
+            daemon=True,
+        )
 
         self.backend.jobs.append(new_task)
         new_task.start()
@@ -558,21 +564,26 @@ class pilot_frontend:
         self.handler.send(what="write_to_tty", data=data)
 
     # TODO: overlay should be handled on driver side
-    def draw(self, y_rows, x_cols, char,
-             *,
-             overlay=True,
-             first_rowcol_is_one=True,
-             **charspec_attrs):
+    def draw(
+        self,
+        y_rows,
+        x_cols,
+        char,
+        *,
+        overlay=True,
+        first_rowcol_is_one=True,
+        **charspec_attrs,
+    ):
 
         if not first_rowcol_is_one:
             x_cols += 1
             y_rows += 1
 
         assert isinstance(char, str)
-        assert len(char.encode()) <= charspec.datamaxsz # <= 8
+        assert len(char.encode()) <= charspec.datamaxsz  # <= 8
 
         if not overlay and y_rows >= 1 and x_cols >= 1:
-            newchar = ''
+            newchar = ""
             for xoffset, newc in enumerate(char):
                 if y_rows - 1 >= len(self.handler.display):
                     break
@@ -582,32 +593,38 @@ class pilot_frontend:
                     break
 
                 oldc = row[x_cols + xoffset - 1]
-                if oldc == ' ':
+                if oldc == " ":
                     newchar += newc
                 else:
                     break
             char = newchar
 
-        req = dict(where=[y_rows, x_cols],
-                   char=char,
-                   attrs=charspec_attrs if charspec_attrs else None)
+        req = dict(
+            where=[y_rows, x_cols],
+            char=char,
+            attrs=charspec_attrs if charspec_attrs else None,
+        )
 
-        self.handler.send(what='draw', data=req)
+        self.handler.send(what="draw", data=req)
 
     # TODO: overlay should be handled on driver side
-    def draw2d(self, y_rows, x_cols, char_matrix,
-               **draw_kwargs):
+    def draw2d(self, y_rows, x_cols, char_matrix, **draw_kwargs):
 
         for yoffset, char in enumerate(char_matrix):
             self.draw(y_rows + yoffset, x_cols, char=char, **draw_kwargs)
 
     # TODO: animations should be handled on driver side
     # TODO: cleanup should be handled on driver side
-    def draw_anim(self, y_rows, x_cols, char_sequence,
-                  *,
-                  stepsize=0.1,
-                  clear_after=True,
-                  **draw_kwargs):
+    def draw_anim(
+        self,
+        y_rows,
+        x_cols,
+        char_sequence,
+        *,
+        stepsize=0.1,
+        clear_after=True,
+        **draw_kwargs,
+    ):
 
         maxsz = 0
         for char in char_sequence:
@@ -616,15 +633,20 @@ class pilot_frontend:
             time.sleep(stepsize)
 
         if clear_after:
-            self.draw(y_rows, x_cols, char=' ' * maxsz, **draw_kwargs)
+            self.draw(y_rows, x_cols, char=" " * maxsz, **draw_kwargs)
 
     # TODO: animations should be handled on driver side
     # TODO: cleanup should be handled on driver side
-    def draw2d_anim(self, y_rows, x_cols, matrix_sequence,
-                    *,
-                    stepsize=0.1,
-                    clear_after=True,
-                    **draw_kwargs):
+    def draw2d_anim(
+        self,
+        y_rows,
+        x_cols,
+        matrix_sequence,
+        *,
+        stepsize=0.1,
+        clear_after=True,
+        **draw_kwargs,
+    ):
 
         y_maxsz = 0
         x_maxsz = 0
@@ -636,13 +658,15 @@ class pilot_frontend:
             time.sleep(stepsize)
 
         if clear_after:
-            cleanup = [' ' * x_maxsz for _ in range(y_maxsz)]
+            cleanup = [" " * x_maxsz for _ in range(y_maxsz)]
             self.draw2d(y_rows, x_cols, char_matrix=cleanup, **draw_kwargs)
+
 
 def main():
     backend = pilot_backend()
 
     if len(sys.argv) < 2:
+
         def interactive_shell(pilot):
             pilot.wait_for_driver()
             pilot.drop_shell()

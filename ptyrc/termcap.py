@@ -100,15 +100,15 @@ class charspec:
 
     def __init__(
         self,
-        data = ' ',
-        fg = 'default',
-        bg = 'default',
-        bold = False,
-        italics = False,
-        underscore = False,
-        strikethrough = False,
-        reverse = False,
-        blink = False,
+        data=" ",
+        fg="default",
+        bg="default",
+        bold=False,
+        italics=False,
+        underscore=False,
+        strikethrough=False,
+        reverse=False,
+        blink=False,
     ):
 
         if isinstance(data, str):

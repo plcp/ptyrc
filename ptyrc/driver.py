@@ -149,6 +149,7 @@ class client_handler(common.basic_handler):
 
         os.write(fake_pty.STDOUT_FILENO, seq)
 
+
 class pty_driver:
 
     def __init__(
@@ -409,11 +410,13 @@ class pty_driver:
         if not self.has_smcup:
             self.has_smcup = True
             if ansiseq.smcup not in self.early_buffer:
+
                 def _rmcup_delayed():
                     print(ansiseq.decoded.smcup)
                     print(ansiseq.decoded.clear)
                     print(flush=True)
-                    print(ansiseq.decoded.rmcup, end='', flush=True)
+                    print(ansiseq.decoded.rmcup, end="", flush=True)
+
                 atexit.register(_rmcup_delayed)
                 print(ansiseq.decoded.smcup, end="")
                 print(ansiseq.decoded.clear, end="")
