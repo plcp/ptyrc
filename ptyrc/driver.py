@@ -13,10 +13,9 @@ import threading
 import time
 import tty
 
-import pyte
-
 import ptyrc.common as common
 import ptyrc.fake_pty as fake_pty
+import ptyrc.screen
 from ptyrc.common import verbose
 from ptyrc.termcap import ansiseq, charspec
 
@@ -61,8 +60,8 @@ class client_handler(common.basic_handler):
             if name != command_name:
                 return
 
-            if self.pyte_screen is None:
-                self.pyte_buffer += value
+            if self.parent.terminal is None:
+                self.parent.terminal.feed(value)
             os.write(sys.stdin.fileno(), value)
 
         if command_name == "refresh_lines" and self.parent.terminal_size is not None:
@@ -98,36 +97,29 @@ class client_handler(common.basic_handler):
         return
 
     def get_lines(self, linelist):
-        if self.parent.pyte_screen is None:
+        if self.parent.terminal is None:
             return
-
-        display = self.parent.pyte_screen.display
+        display = self.parent.terminal.display
 
         linelist.sort()
+        linelist = [lno for lno in linelist if lno < len(display)]
         for lineno in linelist:
-            if lineno >= len(display):
-                continue
-
             self.send(what="set_line", data=dict(where=lineno, line=display[lineno]))
 
     def get_rawlines(self, linelist):
-        if self.parent.pyte_screen is None:
+        if self.parent.terminal is None:
             return
 
-        buffer = self.parent.pyte_screen.buffer
-        nbcols = self.parent.pyte_screen.columns
-
-        linelist.sort()
-        for lineno in linelist:
-            if lineno >= len(buffer):
-                continue
-
+        raw_lines = self.parent.terminal.get_raw_lines(linelist)
+        for lineno, linedata in raw_lines.items():
             packedline = b""
-            for pytechar in [buffer[lineno][x] for x in range(nbcols)]:
-                packedline += charspec(**pytechar._asdict()).pack()
+            for raw_char in linedata:
+                packedline += raw_char.pack()
 
-            rawline = common.b64encode(packedline).decode()
-            self.send(what="set_rawline", data=dict(where=lineno, rawline=rawline))
+            serialized_line = common.b64encode(packedline).decode()
+            self.send(
+                what="set_rawline", data=dict(where=lineno, rawline=serialized_line)
+            )
 
     def write_to_tty(self, input_bytes):
         if self.parent.child_fd is not None:
@@ -176,8 +168,7 @@ class pty_driver:
         self.handler = None
         self.active_client = None
 
-        self.pyte_screen = None
-        self.pyte_buffer = b""
+        self.terminal = None
 
         self.cursor_moved = False
         self.first_write = None
@@ -310,8 +301,8 @@ class pty_driver:
                 s = struct.pack("HHHH", nbrows, nbcols, 0, 0)
                 fcntl.ioctl(self.child_fd, termios.TIOCSWINSZ, s)
 
-                if self.pyte_screen is not None:
-                    self.pyte_screen.resize(lines=nbrows, columns=nbcols)
+                if self.terminal is not None:
+                    self.terminal.resize(nbcols=nbcols, nbrows=nbrows)
 
         # sometime we race before pty has size, need to try again reading it
         if self.terminal_size is None:
@@ -319,9 +310,9 @@ class pty_driver:
             self.poll_termsize()
             return
 
-        # when terminal size is first known, create pyte screen of the right size
-        if self.pyte_screen is None and self.terminal_size is not None:
-            self.pyte_screen = pyte.Screen(*self.terminal_size)
+        # when terminal size is first known, create terminal of the right size
+        if self.terminal is None and self.terminal_size is not None:
+            self.terminal = ptyrc.screen.screen(self.terminal_size)
 
     def cursor_poller(self, poll=0.01):
         """(thread) watch for terminal cursor change, notify client if some"""
@@ -345,45 +336,31 @@ class pty_driver:
                 last_position = self.cursor_position
                 self.send_to_client(what="cursor_position", data=self.cursor_position)
 
-                # (remove b/c it confuses pyte more than anything else)
-                # if self.pyte_screen is not None:
-                #    self.pyte_screen.cursor_position(*cursor_position)
-
             # also use this handler to send pings
             if abs(last_ping - time.time()) > 1:
                 last_ping = time.time()
                 self.send_to_client(what="ping", data=time.time())
 
-    def screen_watcher(self, poll=0.1):
-        """(pyte) feed updates to virtual pyte terminal, sends line updates to client"""
+    def stream_lines_callback(self, screen, dirty_lines, display):
+        if not self.handler:
+            return
+        if self._cfg_stream_lines:
+            self.handler.get_lines(dirty_lines)
+        if self._cfg_stream_rawlines:
+            self.handler.get_rawlines(dirty_lines)
 
-        while self.pyte_screen is None:
+    def screen_watcher(self, poll=0.01):
+        """(terminal) feed updates to virtual terminal, sends line updates to client"""
+
+        while self.terminal is None:
             time.sleep(poll)
 
-        stream = pyte.ByteStream(self.pyte_screen)
         while not self.finished:
-            if not self.pyte_buffer:
+            if not self.terminal.is_dirty:
                 time.sleep(poll)
                 continue
 
-            # every time there is something new in stdout, update pyte screen
-            buffer, self.pyte_buffer = self.pyte_buffer, b""
-            stream.feed(buffer)
-
-            # if there are dirty pyte screen lines, send them to client
-            if len(self.pyte_screen.dirty) > 0:
-                display = self.pyte_screen.display
-                dirty = list(self.pyte_screen.dirty)
-                dirty.sort()  # (!! sorting for efficiency, smaller lines first !!)
-                self.pyte_screen.dirty.clear()
-                for lineno in dirty:
-                    if lineno >= len(display):
-                        continue
-
-                    if self._cfg_stream_lines and self.handler:
-                        self.handler.get_lines([lineno])
-                    if self._cfg_stream_rawlines and self.handler:
-                        self.handler.get_rawlines([lineno])
+            self.terminal.flush(self.stream_lines_callback, clear=True)
 
     #
     # fake_pty.spawn handlers
@@ -430,8 +407,7 @@ class pty_driver:
         if out:
             self.cursor_moved = True
 
-        self.pyte_buffer += out
-
+        self.terminal.feed(out)
         if stdout is None:
             os.write(fake_pty.STDOUT_FILENO, out)
         return out
@@ -503,7 +479,7 @@ class pty_driver:
             )
         )
 
-        # +start polling thread updating internal virtual pyte (& sending updates)
+        # +start polling thread updating internal virtual terminal (& sending updates)
         jobs.append(
             threading.Thread(
                 target=lambda: self.screen_watcher(),

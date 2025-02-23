@@ -94,9 +94,24 @@ class ansiseq:
         cls.ready = True
 
 
+_cache_pyte2raw = dict()
+_cache_raw2packed = dict()
+_cache_packed2raw = dict()
+
+
 class charspec:
     datamaxsz = 8
     packed_size = 8 + datamaxsz
+
+    @staticmethod
+    def from_pyte_char(pyte_char):
+        raw = _cache_pyte2raw.get(pyte_char)
+        if raw is not None:
+            return raw
+
+        raw = charspec(**pyte_char._asdict())
+        _cache_pyte2raw[pyte_char] = raw
+        return raw
 
     def __init__(
         self,
@@ -155,7 +170,13 @@ class charspec:
             + b"".join(v for v in self.flags_seq.values())
         )
 
+    def __hash__(self):
+        return hash((self.data, self.seq))
+
     def pack(self):
+        if self in _cache_raw2packed:
+            return _cache_raw2packed[self]
+
         bitflags = 0
         bitflags |= 0b00000001 if self.flags["bold"] else 0
         bitflags |= 0b00000010 if self.flags["italics"] else 0
@@ -174,11 +195,19 @@ class charspec:
             self.data[i] if i < self.datasz else 0 for i in range(self.datamaxsz)
         )
 
-        return bytes([bitflags] + list(fgcol) + list(bgcol) + [self.datasz]) + datapack
+        retvalue = (
+            bytes([bitflags] + list(fgcol) + list(bgcol) + [self.datasz]) + datapack
+        )
+
+        _cache_raw2packed[self] = retvalue
+        return retvalue
 
     @classmethod
     def unpack(cls, packed_bytes):
         assert len(packed_bytes) == cls.packed_size
+
+        if packed_bytes in _cache_packed2raw:
+            return _cache_packed2raw[packed_bytes]
 
         bitflags = packed_bytes[0]
         bold = bool(bitflags & 0b00000001)
@@ -252,7 +281,7 @@ class charspec:
 
         assert datasz <= cls.datamaxsz
         data = datapacked[:datasz].decode()
-        return cls(
+        retvalue = cls(
             data=data,
             fg=fg,
             bg=bg,
@@ -263,6 +292,9 @@ class charspec:
             reverse=reverse,
             blink=blink,
         )
+
+        _cache_packed2raw[packed_bytes] = retvalue
+        return retvalue
 
     def flags_to_seq(self, bold, italics, underscore, strikethrough, reverse, blink):
         seqs = dict()

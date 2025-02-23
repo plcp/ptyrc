@@ -436,7 +436,7 @@ class pilot_frontend:
                 nbcols, nbrows = last_size
 
                 colno, lineno = self.cursor
-                maxlen = 9999 if not cropped else nbcols - 6
+                maxlen = 9999 if not cropped else nbcols
 
                 disp = list(self.handler.display)
                 colored = 0
@@ -453,6 +453,7 @@ class pilot_frontend:
                                 disp[i] = raw.render(maxlen=maxlen, cursor_at=colno)
                             else:
                                 disp[i] = raw.render(maxlen=maxlen)
+                            disp[i] += ansiseq.decoded.sgr0
 
                     if colored > max(nbrows - 6, 0):
                         break
@@ -473,7 +474,8 @@ class pilot_frontend:
                 if cropped and rqrows > nbrows:
                     extra = rqrows - nbrows + 1
                     half = len(disp) // 2 - (extra + 1) // 2
-                    midmsg = f"(... {len(disp) - half * 2 - extra % 2} truncated ...)"
+                    midmsg = f" (... {len(disp) - half * 2 - extra % 2} truncated ...)"
+                    midmsg = midmsg.ljust(nbcols)
                     disp = disp[: half + extra % 2] + [midmsg] + disp[-half:]
 
                 if cropped and not show_colors:
