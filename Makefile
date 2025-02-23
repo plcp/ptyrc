@@ -1,6 +1,6 @@
 
 venv/bin/activate:
-	virtualenv venv
+	python3 -m venv venv
 	source venv/bin/activate && pip install -r requirements.txt
 
 requirements: venv/bin/activate
@@ -14,3 +14,6 @@ format:
 
 install:
 	pip install .
+
+install-nodeps:
+	pip install . --no-deps
