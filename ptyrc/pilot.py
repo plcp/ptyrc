@@ -24,6 +24,7 @@ class server_handler(common.basic_handler):
         self.send(what="get_value", data="argv_cmd")
         self.send(what="get_value", data="terminal_size")
         self.send(what="get_value", data="cursor_position")
+        self.send(what="command", data="enable_stream_lines")
         self.display = []
         self.raw_display = dict()
 
@@ -378,9 +379,14 @@ class pilot_frontend:
         if len(self.handler.display) == 0:
             self.handler.send("get_value", data="terminal_size")
             self.handler.send("command", data="refresh_lines")
+            self.handler.send("command", data="enable_stream_lines")
             time.sleep(1)
         if len(self.handler.display) == 0:
             raise TimeoutError("remote send nothing to display :(")
+
+        if show_colors:
+            self.handler.send("command", data="refresh_rawlines")
+            self.handler.send("command", data="enable_stream_rawlines")
 
         try:
             _echo(ansiseq.decoded.smcup, end="")
@@ -393,9 +399,6 @@ class pilot_frontend:
                     stdin_mode = None
 
             while not self.handler.finished:
-
-                if show_colors:
-                    self.handler.send("command", data="refresh_rawlines")
 
                 if hook_stdin:
                     r, _, _ = select.select([pty.STDIN_FILENO], [], [], 0)
@@ -507,6 +510,7 @@ class pilot_frontend:
         original_method = self.handler.stdin
         is_finished = False
 
+        self.handler.send("command", data="enable_stream_stdin")
         try:
 
             def stdin_interceptor(data):

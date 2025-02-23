@@ -72,6 +72,18 @@ class client_handler(common.basic_handler):
             self.get_rawlines(list(range(self.parent.terminal_size[1])))
             return
 
+        if command_name.startswith(("enable_", "disable_")):
+            boolean_value = command_name.startswith("enable_")
+            _, boolean_name = command_name.split("_", 1)
+
+            try:
+                what = getattr(self.parent, "_cfg_" + boolean_name)
+                assert isinstance(what, bool)
+                setattr(self.parent, "_cfg_" + boolean_name, boolean_value)
+            except AttributeError as e:
+                verbose(f"Unknown boolean: {boolean_name}")
+            return
+
         if (
             False
             or _handle_seq("terminal_reset", ansiseq.reset)
@@ -175,6 +187,11 @@ class pty_driver:
         self.cursor_position = None
         self.terminal_size = None
 
+        self._cfg_stream_lines = True
+        self._cfg_stream_rawlines = False
+        self._cfg_stream_stdout = False
+        self._cfg_stream_stdin = False
+
         self.finished = False
 
     def handle_client(self, client, addr, maxfails=None):
@@ -236,6 +253,7 @@ class pty_driver:
             # if handle_client returned or raised, end connection / cleanup
             finally:
                 self.active_client = None
+                self.handler = None
 
                 try:
                     remote.shutdown(socket.SHUT_RDWR)
@@ -265,6 +283,7 @@ class pty_driver:
                     pass
 
             self.active_client = None
+            self.handler = None
             time.sleep(1)
 
     def poll_termsize(self, wait_for_child=None):
@@ -360,9 +379,10 @@ class pty_driver:
                     if lineno >= len(display):
                         continue
 
-                    self.send_to_client(
-                        what="set_line", data=dict(where=lineno, line=display[lineno])
-                    )
+                    if self._cfg_stream_lines and self.handler:
+                        self.handler.get_lines([lineno])
+                    if self._cfg_stream_rawlines and self.handler:
+                        self.handler.get_rawlines([lineno])
 
     #
     # fake_pty.spawn handlers
@@ -376,7 +396,8 @@ class pty_driver:
         else:
             out = b""
 
-        self.send_to_client(what="stdout", data=out)
+        if self._cfg_stream_stdout:
+            self.send_to_client(what="stdout", data=out)
 
         # first second of stdout is buffered in early_buffer
         self.first_write = self.first_write or time.time()
@@ -450,7 +471,8 @@ class pty_driver:
             return fake_pty.SKIP_STDIN
 
         # transmit data to client
-        self.send_to_client(what="stdin", data=indata)
+        if self._cfg_stream_stdin:
+            self.send_to_client(what="stdin", data=indata)
 
         # forward data to process
         return indata
