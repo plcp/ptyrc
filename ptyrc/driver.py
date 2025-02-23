@@ -85,21 +85,6 @@ class client_handler(common.basic_handler):
         verbose(f"Unknown command: {command_name}")
         return
 
-    def get_dirty(self, extra_linelist):
-        if self.pyte_screen is None:
-            return
-
-        dirty = list(self.pyte_screen.dirty.union(extra_linelist))
-        dirty.sort()
-        self.pyte_screen.dirty.clear()
-
-        display = self.pyte_screen.display
-        for lineno in dirty:
-            if lineno >= len(display):
-                continue
-
-            self.send(what="set_line", data=dict(where=lineno, line=display[lineno]))
-
     def get_lines(self, linelist):
         if self.parent.pyte_screen is None:
             return
