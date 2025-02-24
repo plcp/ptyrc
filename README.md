@@ -58,6 +58,8 @@ You can also use `ptyrc` to display the remote application:
 >>> pilot.interact()  # interact with remote terminal (^X to exit)
 ```
 
+![interact](doc/interact.gif)
+
 Long term goal is to add everything to manipulate the wrapped CLI, just as
 [selenium](https://pypi.org/project/selenium/) manipulates browsers.
 
